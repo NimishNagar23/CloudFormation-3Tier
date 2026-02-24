@@ -1,0 +1,92 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Nested Stack: Security Groups for 3-Tier Architecture'
+
+Parameters:
+  VpcId:
+    Type: 'AWS::EC2::VPC::Id'
+    Description: The VPC ID where the security groups will be created
+  EnvironmentName:
+    Type: String
+    Default: 3Tier
+
+Resources:
+  ALBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Allow HTTP and HTTPS originating from the internet
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-ALB-SG'
+
+  WebInstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Allow HTTP traffic from ALB and SSH from anywhere (for debugging)
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-WebInstance-SG'
+
+  AppInstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Allow custom app traffic from Web tier
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        # Assuming app runs on 8080, modify as necessary
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref WebInstanceSecurityGroup
+        # Also allow SSH from Web Instance SG for management
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref WebInstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-AppInstance-SG'
+
+  DBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Allow database access from App tier
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        # Assuming MySQL (3306). Change to 5432 for Postgres.
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref AppInstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-DB-SG'
+
+Outputs:
+  ALBSecurityGroup:
+    Value: !Ref ALBSecurityGroup
+  WebInstanceSecurityGroup:
+    Value: !Ref WebInstanceSecurityGroup
+  AppInstanceSecurityGroup:
+    Value: !Ref AppInstanceSecurityGroup
+  DBSecurityGroup:
+    Value: !Ref DBSecurityGroup

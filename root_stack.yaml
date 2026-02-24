@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Root Stack: 3-Tier Nested Architecture'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: 3Tier
+  InstanceType:
+    Type: String
+    Default: t2.micro
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access
+    Type: 'AWS::EC2::KeyPair::KeyName'
+  DBUsername:
+    Type: String
+    NoEcho: true
+    Default: admin
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Default: password123! # Remember to change this
+
+Resources:
+  VpcStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://nimish-3tier-cfn-templates.s3.ap-south-1.amazonaws.com/vpc-stack.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+
+  SecurityStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: VpcStack
+    Properties:
+      TemplateURL: https://nimish-3tier-cfn-templates.s3.ap-south-1.amazonaws.com/security-stack.yaml
+      Parameters:
+        VpcId: !GetAtt VpcStack.Outputs.VpcId
+        EnvironmentName: !Ref EnvironmentName
+
+  WebStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - VpcStack
+      - SecurityStack
+    Properties:
+      TemplateURL: https://nimish-3tier-cfn-templates.s3.ap-south-1.amazonaws.com/web-stack.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VpcStack.Outputs.VpcId
+        PublicSubnet1: !GetAtt VpcStack.Outputs.PublicSubnet1
+        PublicSubnet2: !GetAtt VpcStack.Outputs.PublicSubnet2
+        ALBSecurityGroup: !GetAtt SecurityStack.Outputs.ALBSecurityGroup
+        WebInstanceSecurityGroup: !GetAtt SecurityStack.Outputs.WebInstanceSecurityGroup
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyName
+
+  AppStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - VpcStack
+      - SecurityStack
+      - WebStack
+    Properties:
+      TemplateURL: https://nimish-3tier-cfn-templates.s3.ap-south-1.amazonaws.com/app-stack.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VpcStack.Outputs.VpcId
+        PrivateAppSubnet1: !GetAtt VpcStack.Outputs.PrivateAppSubnet1
+        PrivateAppSubnet2: !GetAtt VpcStack.Outputs.PrivateAppSubnet2
+        AppInstanceSecurityGroup: !GetAtt SecurityStack.Outputs.AppInstanceSecurityGroup
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyName
+
+  DBStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - VpcStack
+      - SecurityStack
+      - AppStack
+    Properties:
+      TemplateURL: https://nimish-3tier-cfn-templates.s3.ap-south-1.amazonaws.com/db-stack.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        PrivateDBSubnet1: !GetAtt VpcStack.Outputs.PrivateDBSubnet1
+        PrivateDBSubnet2: !GetAtt VpcStack.Outputs.PrivateDBSubnet2
+        DBSecurityGroup: !GetAtt SecurityStack.Outputs.DBSecurityGroup
+        DBUsername: !Ref DBUsername
+        DBPassword: !Ref DBPassword
+
+Outputs:
+  WebALBEndpoint:
+    Description: URL of the Web site
+    Value: !GetAtt WebStack.Outputs.WebALBDnsName
+  AppALBEndpoint:
+    Description: Internal URL of the App tier
+    Value: !GetAtt AppStack.Outputs.AppALBDnsName
+  DatabaseEndpoint:
+    Description: Backend DB Endpoint Address
+    Value: !GetAtt DBStack.Outputs.DBEndpointAddress

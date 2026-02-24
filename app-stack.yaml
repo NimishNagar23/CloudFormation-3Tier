@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Nested Stack: App Tier (Internal ALB + ASG)'
+
+Parameters:
+  VpcId:
+    Type: 'AWS::EC2::VPC::Id'
+  PrivateAppSubnet1:
+    Type: 'AWS::EC2::Subnet::Id'
+  PrivateAppSubnet2:
+    Type: 'AWS::EC2::Subnet::Id'
+  AppInstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup::Id'
+  EnvironmentName:
+    Type: String
+    Default: 3Tier
+  InstanceType:
+    Type: String
+    Default: t2.micro
+  KeyName:
+    Type: 'AWS::EC2::KeyPair::KeyName'
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64'
+
+Resources:
+  AppALB:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Name: !Sub '${EnvironmentName}-AppALB'
+      Scheme: internal
+      Subnets:
+        - !Ref PrivateAppSubnet1
+        - !Ref PrivateAppSubnet2
+      SecurityGroups:
+        # Re-using the App Instances SG for the ALB for simplicity, or we could pass another
+        - !Ref AppInstanceSecurityGroup
+
+  AppTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub '${EnvironmentName}-AppTG'
+      VpcId: !Ref VpcId
+      Port: 8080
+      Protocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+
+  AppALBListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      LoadBalancerArn: !Ref AppALB
+      Port: 8080
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AppTargetGroup
+
+  AppLaunchTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
+    Properties:
+      LaunchTemplateName: !Sub '${EnvironmentName}-AppLT'
+      LaunchTemplateData:
+        ImageId: !Ref LatestAmiId
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyName
+        SecurityGroupIds:
+          - !Ref AppInstanceSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            # In a real scenario, this would install the app server (e.g. Node.js, Spring Boot)
+            echo "App Tier Started"
+
+  AppASG:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      AutoScalingGroupName: !Sub '${EnvironmentName}-AppASG'
+      VPCZoneIdentifier:
+        - !Ref PrivateAppSubnet1
+        - !Ref PrivateAppSubnet2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref AppLaunchTemplate
+        Version: !GetAtt AppLaunchTemplate.LatestVersionNumber
+      MinSize: '1'
+      MaxSize: '2'
+      DesiredCapacity: '1'
+      TargetGroupARNs:
+        - !Ref AppTargetGroup
+
+Outputs:
+  AppALBDnsName:
+    Description: DNS Name of the App Tier Internal ALB
+    Value: !GetAtt AppALB.DNSName

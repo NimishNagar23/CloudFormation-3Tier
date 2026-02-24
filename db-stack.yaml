@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Nested Stack: Database Tier (RDS MySQL)'
+
+Parameters:
+  PrivateDBSubnet1:
+    Type: 'AWS::EC2::Subnet::Id'
+  PrivateDBSubnet2:
+    Type: 'AWS::EC2::Subnet::Id'
+  DBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup::Id'
+  EnvironmentName:
+    Type: String
+    Default: 3Tier
+  DBUsername:
+    Type: String
+    NoEcho: true
+    Default: admin
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Default: password123! # Overwrite this parameter in a real environment
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+
+Resources:
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: Subnet group for DB Tier
+      SubnetIds:
+        - !Ref PrivateDBSubnet1
+        - !Ref PrivateDBSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-DBSubnetGroup'
+
+  DBInstance:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBName: appdb
+      Engine: mysql
+      EngineVersion: '8.0'
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: '20'
+      StorageType: gp2
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+        # In a real environment, set MultiAZ according to requirement (true for HA)
+      MultiAZ: false
+      DBSubnetGroupName: !Ref DBSubnetGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+
+Outputs:
+  DBEndpointAddress:
+    Description: DB Instance Endpoint Address
+    Value: !GetAtt DBInstance.Endpoint.Address
+  DBEndpointPort:
+    Description: DB Instance Endpoint Port
+    Value: !GetAtt DBInstance.Endpoint.Port
